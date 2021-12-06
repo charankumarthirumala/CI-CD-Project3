@@ -76,7 +76,7 @@ jobs:
              # Your code here
              cd ./frontend
              npm i
-             npm audit --audit-level=critical --force
+             npm audit fix --audit-level=critical --force
   scan-backend:
     docker:
       - image: circleci/node:13.8.0
@@ -88,7 +88,19 @@ jobs:
              # Your code here
              cd ./backend
              npm i
-             npm audit --audit-level=critical                
+             npm audit fix --audit-level=critical   
+deploy-infrastructure:
+    docker:
+      - image: amazon/aws-cli
+    steps:
+      - checkout
+      - run:
+          name: install tar
+          command: yum -y install tar gzip
+      - run:
+          name: Ensure back-end infrastructure exists
+          command: |
+            aws cloudformation deploy --template-file .circleci/files/backend.yml --stack-name "udapeople-backendStack-${CIRCLE_WORKFLOW_ID:0:7}" --tags project="udapeopleBackend_${CIRCLE_WORKFLOW_ID:0:7}" --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"                          
 
 workflows:
   default:
@@ -102,5 +114,7 @@ workflows:
      - scan-backend:
           requires: [build-backend]
      - scan-frontend:
-          requires: [build-frontend]                    
+          requires: [build-frontend]  
+     - deploy-infrastructure:
+          requires: [scan-frontend, scan-backend]
 
