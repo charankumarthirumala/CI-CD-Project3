@@ -297,7 +297,39 @@ jobs:
             ANSIBLE_HOST_KEY_CHECKING=False
             pwd
             ansible-playbook -i .circleci/ansible/inventory.txt .circleci/ansible/deploy-backend.yml
-        #- destroy-environment        
+        #- destroy-environment   
+  smoke-test:
+    docker:
+      - image: python:3.7-alpine3.12 
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            apk add --update curl nodejs npm
+            pip install awscli
+      - run:
+          name: Backend  Smoke test
+          command: |
+            back_ip=$(curl -H "token: 076df38e-670d-41a5-8f34-909d4037bd01" --request GET https://api.memstash.io/values/ec2_back_ip_${CIRCLE_WORKFLOW_ID})
+            if curl -s "http://$back_ip:3030/api/status" | grep "ok"
+            then
+              echo "Backend alive, Proceeding"
+            else
+              exit 0
+            fi
+      - run:
+          name: Frontend smoke test.
+          command: |
+            front_url=$(curl -H "token: 076df38e-670d-41a5-8f34-909d4037bd01" --request GET https://api.memstash.io/values/s3bucket_${CIRCLE_WORKFLOW_ID})
+            if curl -s ${front_url} | grep "Welcome"
+            then
+              echo "Frontend alive"
+            else
+              exit 1
+            fi        
+      - destroy-environment
+      - revert-migrations                 
 
 workflows:
   default:
@@ -321,6 +353,7 @@ workflows:
      - deploy-frontend:
             requires: [run-migrations]
      - deploy-backend:
-            requires: [deploy-frontend]                              
+            requires: [deploy-frontend]     
+      - smoke-test                                     
 
 
