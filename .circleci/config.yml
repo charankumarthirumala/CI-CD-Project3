@@ -101,7 +101,29 @@ jobs:
           name: Ensure back-end infrastructure exists
           command: |
             aws cloudformation deploy --template-file .circleci/files/backend.yml --stack-name "udapeople-backendStack-${CIRCLE_WORKFLOW_ID:0:7}" --tags project="udapeopleBackend_${CIRCLE_WORKFLOW_ID:0:7}" --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"                          
-
+      - run:
+          name: Ensure front-end infrastructure exist
+          command: |
+            aws cloudformation deploy --template-file .circleci/files/frontend.yml --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}" --tags project="udapeople-frontendStack-${CIRCLE_WORKFLOW_ID:0:7}"   --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"
+      - run:
+          name: Add back-end ip/url using memstash to ansible inventory
+          command: |
+            cwid=$(echo "aws ec2 describe-instances --filters 'Name=tag:project,Values=udapeopleBackend_${CIRCLE_WORKFLOW_ID:0:7}' --query 'Reservations[*].Instances[*].PublicIpAddress' --output text")
+            echo $cwid > backip.sh; chmod 755 backip.sh
+            backendip=$(./backip.sh)
+            curl -H "Content-Type: text/plain" -H "token: 076df38e-670d-41a5-8f34-909d4037bd01" --request PUT --data "$backendip" https://api.memstash.io/values/ec2_back_ip_${CIRCLE_WORKFLOW_ID}
+            cwid2=$(echo "aws ec2 describe-instances --filters 'Name=tag:project,Values="udapeopleBackend_${CIRCLE_WORKFLOW_ID:0:7}"' --query 'Reservations[*].Instances[*].PublicDnsName' --output text")
+            echo $cwid2 > backurl.sh; chmod 755 backurl.sh
+            backendurl=$(./backurl.sh)
+            curl -H "Content-Type: text/plain" -H "token: 076df38e-670d-41a5-8f34-909d4037bd01" --request PUT --data "$backendurl" https://api.memstash.io/values/ec2_back_url_${CIRCLE_WORKFLOW_ID}
+            echo "[web]" > .circleci/ansible/inventory.txt
+            echo  $backendip >> .circleci/ansible/inventory.txt
+            cat  .circleci/ansible/inventory.txt
+      - persist_to_workspace:
+          root:  ~/
+          paths:
+            - project/.circleci/ansible/inventory.txt   
+          # Here's where you will add some code to rollback on failure         
 workflows:
   default:
     jobs:
@@ -116,5 +138,9 @@ workflows:
      - scan-frontend:
           requires: [build-frontend]  
      - deploy-infrastructure:
-          requires: [scan-frontend, scan-backend]
+            requires: [scan-frontend, scan-backend]
+            filters:
+                branches:
+                  only:
+                    - main
 
