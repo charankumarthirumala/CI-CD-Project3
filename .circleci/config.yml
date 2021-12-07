@@ -11,6 +11,21 @@ commands:
             aws cloudformation delete-stack --stack-name udapeople-backendStack-${CIRCLE_WORKFLOW_ID:0:7}
             aws cloudformation delete-stack --stack-name udapeople-frontendStack-${CIRCLE_WORKFLOW_ID:0:7}
             echo  "Deleted"
+  revert-migrations:
+    description: Revert the last migration if successfully run in the current workflow.  
+    steps:
+      - run:
+          name: Revert migrations
+          when: on_fail
+          command: |
+            SUCCESS=`curl -H "token: bc0ecb36-991a-4dc2-a4a3-5fc4ea7814bd" --request GET https://api.memstash.io/values/migration_${CIRCLE_WORKFLOW_ID}`
+            if [ "$SUCCESS" == "Migration Successful" ]; 
+            then
+               cd ~/project/backend
+               npm install
+               npm run migrations:revert
+               exit 1
+            fi              
 jobs:
   build-frontend:
     docker:
@@ -206,7 +221,84 @@ jobs:
               curl -H "token: 076df38e-670d-41a5-8f34-909d4037bd01" --request GET https://api.memstash.io/values/migration_${CIRCLE_WORKFLOW_ID}
             fi
      # Here's where you will add some code to rollback on failure 
-     #- destroy-environment                      
+     #- destroy-environment    
+   
+  deploy-frontend:
+    docker:
+      - image: circleci/node:13.8.0
+    steps:
+      - checkout
+      - run:
+          name: Install dependencies
+          command: |
+            sudo apt-get -y -qq update
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install
+      - attach_workspace:
+          at: .
+      - run:
+          # MUST be http not https
+          name: Get backend url
+          command: |
+            API_IPback=$(curl -H "token: 076df38e-670d-41a5-8f34-909d4037bd01" --request GET https://api.memstash.io/values/ec2_back_ip_${CIRCLE_WORKFLOW_ID})
+            export API_URL=$(echo "http://$API_IPback:3030")
+            cd frontend
+            echo "${API_URL}" > apiurl.txt
+      - run:
+          name: Deploy frontend objects
+          command: |
+            cd frontend
+            export API_URL=$(cat apiurl.txt)
+            cat apiurl.txt
+            npm i
+            npm run build
+            s3Bucket=$(echo "udapeople-${CIRCLE_WORKFLOW_ID:0:7}")
+            aws s3 sync dist s3://$s3Bucket/
+            s3FullUrl=("http://$s3Bucket.s3-website-us-east-1.amazonaws.com")
+            curl -H "Content-Type: text/plain" -H "token: 076df38e-670d-41a5-8f34-909d4037bd01" --request PUT --data "$s3FullUrl" https://api.memstash.io/values/s3bucket_${CIRCLE_WORKFLOW_ID}
+      - persist_to_workspace:
+          root: .
+          paths:
+            - frontend/dist
+      #- destroy-environment
+  deploy-backend:
+    docker:
+      - image: python:3.7-alpine3.11
+  # Make sure ubuntu is 20.04 in backend.yml or you will have issues with PM2. read .circleci/backend/files for more info
+    steps:
+      - checkout
+      - add_ssh_keys:
+          fingerprints:
+            - b5:5a:31:12:f5:b6:c6:76:a6:0d:e8:62:28:2a:51:71
+      - attach_workspace:
+          at: ~/
+      - run:
+          name: Install dependencies
+          command: |
+            apk add --update ansible tar gzip ansible nodejs npm less
+            pip install awscli
+      - run:
+          name: Deploy backend
+          command: |
+            [[ ! -d backend ]] && mkdir backend
+            myenv="backend/.env"
+            echo ENVIROMENT=production > $myenv
+            echo TYPEORM_CONNECTION=postgres >> $myenv
+            echo TYPEORM_MIGRATIONS_DIR=./src/migrations >> $myenv
+            echo TYPEORM_ENTITIES=./src/modules/domain/**/*.entity.ts >> $myenv
+            echo TYPEORM_MIGRATIONS=./src/migrations/*.ts >> $myenv
+            echo TYPEORM_HOST=$TYPEORM_HOST >> $myenv
+            echo TYPEORM_PORT=$TYPEORM_PORT >> $myenv
+            echo TYPEORM_USERNAME=$TYPEORM_USERNAME >> $myenv
+            echo TYPEORM_PASSWORD=$TYPEORM_PASSWORD >> $myenv
+            echo TYPEORM_DATABASE=$TYPEORM_DATABASE >> $myenv
+            tar -cvf backend.tar backend
+            ANSIBLE_HOST_KEY_CHECKING=False
+            pwd
+            ansible-playbook -i .circleci/ansible/inventory.txt .circleci/ansible/deploy-backend.yml
+        #- destroy-environment        
+
 workflows:
   default:
     jobs:
@@ -225,6 +317,10 @@ workflows:
      - configure-infrastructure:
            requires: [deploy-infrastructure]   
      - run-migrations:
-            requires: [configure-infrastructure]                    
+            requires: [configure-infrastructure]  
+     - deploy-frontend:
+            requires: [run-migrations]
+     - deploy-backend:
+            requires: [deploy-frontend]                              
 
 
