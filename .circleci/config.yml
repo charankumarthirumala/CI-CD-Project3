@@ -212,64 +212,51 @@ jobs:
           workflow_id: "${CIRCLE_WORKFLOW_ID:0:7}"  
       - revert-migrations:
           workflow_id: "${CIRCLE_WORKFLOW_ID:0:7}"      
+
   deploy-backend:
     docker:
       - image: python:3.7-alpine3.11
+  # Make sure ubuntu is 20.04 in backend.yml or you will have issues with PM2. read .circleci/backend/files for more info
     steps:
       - checkout
-      - add_ssh_keys: 
-          fingerprints: [b5:5a:31:12:f5:b6:c6:76:a6:0d:e8:62:28:2a:51:71]
+      - add_ssh_keys:
+          fingerprints:
+            - b5:5a:31:12:f5:b6:c6:76:a6:0d:e8:62:28:2a:51:71
       - attach_workspace:
-            at: ~/
+          at: ~/
       - run:
           name: Install dependencies
           command: |
-            # Your code here
-            apk update
-            apk upgrade
-            apk add unzip 
-            apk add curl
-            /usr/local/bin/python -m pip install --upgrade pip    
+            apk add --update ansible
+            apk add --update tar gzip nodejs npm
+            apk add --update openssh-client
       - run:
-          name: Install node
+          name: Compress Backend
           command: |
-            apk add --update nodejs nodejs-npm
-            node --version
-            npm --version
-      - run:
-          name: Install ansible
-          command: |
-            # your code here              
-            apk add --update ansible 
-            ansible --version
-      - run:
-          name: Install aws
-          command: |
-            pip install awscli --upgrade   
-            aws --version       
+            [[ ! -d backend ]] && mkdir backend
+            myenv="backend/.env"
+            echo ENVIROMENT=production > $myenv
+            echo NODE_ENV=production >> $myenv
+            echo TYPEORM_CONNECTION=postgres >> $myenv
+            echo TYPEORM_MIGRATIONS_DIR=./src/migrations >> $myenv
+            echo TYPEORM_ENTITIES=./src/modules/domain/**/*.entity.ts >> $myenv
+            echo TYPEORM_MIGRATIONS=./src/migrations/*.ts >> $myenv
+            echo TYPEORM_HOST=$TYPEORM_HOST >> $myenv
+            echo TYPEORM_PORT=$TYPEORM_PORT >> $myenv
+            echo TYPEORM_USERNAME=$TYPEORM_USERNAME >> $myenv
+            echo TYPEORM_PASSWORD=$TYPEORM_PASSWORD >> $myenv
+            echo TYPEORM_DATABASE=$TYPEORM_DATABASE >> $myenv
+            cat $myenv
+            tar -C backend -czvf artifact.tar.gz .
+            ls -la
       - run:
           name: Deploy backend
           command: |
-            # your code here
-            echo "cd backend -------"
-            cd backend
-            echo "npm install -------"
-            npm i
-            npm run build
-            npm audit fix
-            cd ..
-            # Zip the directory
-            echo "zip the directory -------"
-            tar -C backend -czvf artifact.tar.gz .
-            echo "mv artifac to ansible -------"
-            mv artifact.tar.gz .circleci/ansible/
-            cd .circleci/ansible
-            echo "Contents  of the inventory.txt file is -------"
-            cat inventory.txt
-            ansible-playbook -i inventory.txt deploy-backend.yml
-          environment:
-            ANSIBLE_HOST_KEY_CHECKING: false
-  
+            ANSIBLE_HOST_KEY_CHECKING=False
+            pwd
+            cat .circleci/ansible/inventory.txt
+            ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i .circleci/ansible/inventory.txt .circleci/ansible/deploy-backend.yml
+
       - destroy-environment:
           workflow_id: "${CIRCLE_WORKFLOW_ID:0:7}"    
       - revert-migrations:
